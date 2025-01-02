@@ -49,17 +49,28 @@ contract MentorshipSystem {
     event SessionCompleted(uint256 indexed sessionId);
     event PaymentProcessed(uint256 indexed sessionId, uint256 amount);
     
+    modifier onlyPlatform() {
+        require(msg.sender == platformWallet, "Only platform can call this function");
+        _;
+    }
+    
     constructor() {
         platformWallet = payable(msg.sender);
         sessionCounter = 0;
     }
     
-    function registerMentor(string memory _name, string memory _expertise, uint256 _hourlyRate) external {
-        require(!mentors[msg.sender].isAvailable, "Mentor already registered");
+    // Sadece platform tarafından mentor eklenebilir
+    function registerMentor(
+        address payable _mentorAddress, 
+        string memory _name, 
+        string memory _expertise, 
+        uint256 _hourlyRate
+    ) external onlyPlatform {
+        require(!mentors[_mentorAddress].isAvailable, "Mentor already registered");
         
         uint256[] memory emptyArray;
-        mentors[msg.sender] = Mentor({
-            walletAddress: payable(msg.sender),
+        mentors[_mentorAddress] = Mentor({
+            walletAddress: _mentorAddress,
             name: _name,
             expertise: _expertise,
             hourlyRate: _hourlyRate,
@@ -69,9 +80,10 @@ contract MentorshipSystem {
             sessionIds: emptyArray
         });
         
-        emit MentorRegistered(msg.sender, _name, _expertise);
+        emit MentorRegistered(_mentorAddress, _name, _expertise);
     }
     
+    // Öğrenci kayıt fonksiyonu - herkes kullanabilir
     function registerStudent(string memory _name) external {
         require(!students[msg.sender].isRegistered, "Student already registered");
         
@@ -119,6 +131,23 @@ contract MentorshipSystem {
         emit SessionStarted(_mentorAddress, msg.sender, block.timestamp);
     }
     
+    // Mentor bilgilerini güncelleme - sadece platform
+    function updateMentorInfo(
+        address _mentorAddress,
+        string memory _name,
+        string memory _expertise,
+        uint256 _hourlyRate,
+        bool _isAvailable
+    ) external onlyPlatform {
+        require(mentors[_mentorAddress].walletAddress != address(0), "Mentor not registered");
+        
+        Mentor storage mentor = mentors[_mentorAddress];
+        mentor.name = _name;
+        mentor.expertise = _expertise;
+        mentor.hourlyRate = _hourlyRate;
+        mentor.isAvailable = _isAvailable;
+    }
+    
     function endSession(address _studentAddress) external {
         require(msg.sender == mentors[msg.sender].walletAddress, "Only mentor can end session");
         
@@ -152,33 +181,27 @@ contract MentorshipSystem {
         mentor.rating = ((mentor.rating * mentor.totalRatings) + _rating) / (mentor.totalRatings + 1);
         mentor.totalRatings++;
     }
-    
+
+    // View functions
     function getMentorRating(address _mentorAddress) external view returns (uint256, uint256) {
         return (mentors[_mentorAddress].rating, mentors[_mentorAddress].totalRatings);
     }
 
-    // Eklenen yeni fonksiyonlar
-    function getMentorSessions() external view returns (uint256[] memory) {
-        return mentors[msg.sender].sessionIds;
+    function getMentorSessions(address _mentorAddress) external view returns (uint256[] memory) {
+        return mentors[_mentorAddress].sessionIds;
     }
 
     function getStudentSessions() external view returns (uint256[] memory) {
         return students[msg.sender].sessionIds;
     }
 
-    function updateMentorStatus(bool _isAvailable) external {
-        require(mentors[msg.sender].walletAddress != address(0), "Not a registered mentor");
-        mentors[msg.sender].isAvailable = _isAvailable;
+    // Platform emergency functions
+    function updatePlatformFee(uint256 _newFee) external onlyPlatform {
+        require(_newFee <= 20, "Fee cannot exceed 20%");
+        platformFee = _newFee;
     }
 
-    function updateHourlyRate(uint256 _newRate) external {
-        require(mentors[msg.sender].walletAddress != address(0), "Not a registered mentor");
-        mentors[msg.sender].hourlyRate = _newRate;
-    }
-
-    // Emergency functions
-    function withdrawEmergency() external {
-        require(msg.sender == platformWallet, "Only platform owner can withdraw");
+    function withdrawEmergency() external onlyPlatform {
         platformWallet.transfer(address(this).balance);
     }
-} 
+}
