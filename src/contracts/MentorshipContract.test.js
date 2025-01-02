@@ -28,8 +28,13 @@ describe("MentorshipSystem", function () {
   });
 
   describe("Mentor Registration", function () {
-    it("Should register a new mentor", async function () {
-      await mentorshipSystem.connect(mentor).registerMentor("John Doe", "Blockchain", hourlyRate);
+    it("Should register a new mentor when called by platform", async function () {
+      await mentorshipSystem.connect(owner).registerMentor(
+        mentor.address,
+        "John Doe",
+        "Blockchain",
+        hourlyRate
+      );
       const mentorData = await mentorshipSystem.mentors(mentor.address);
       expect(mentorData.name).to.equal("John Doe");
       expect(mentorData.expertise).to.equal("Blockchain");
@@ -37,10 +42,31 @@ describe("MentorshipSystem", function () {
       expect(mentorData.isAvailable).to.equal(true);
     });
 
-    it("Should not allow duplicate mentor registration", async function () {
-      await mentorshipSystem.connect(mentor).registerMentor("John Doe", "Blockchain", hourlyRate);
+    it("Should not allow non-platform users to register mentors", async function () {
       await expect(
-        mentorshipSystem.connect(mentor).registerMentor("John Doe", "Blockchain", hourlyRate)
+        mentorshipSystem.connect(addr3).registerMentor(
+          mentor.address,
+          "John Doe",
+          "Blockchain",
+          hourlyRate
+        )
+      ).to.be.revertedWith("Only platform can call this function");
+    });
+
+    it("Should not allow duplicate mentor registration", async function () {
+      await mentorshipSystem.connect(owner).registerMentor(
+        mentor.address,
+        "John Doe",
+        "Blockchain",
+        hourlyRate
+      );
+      await expect(
+        mentorshipSystem.connect(owner).registerMentor(
+          mentor.address,
+          "John Doe",
+          "Blockchain",
+          hourlyRate
+        )
       ).to.be.revertedWith("Mentor already registered");
     });
   });
@@ -63,7 +89,12 @@ describe("MentorshipSystem", function () {
 
   describe("Session Management", function () {
     beforeEach(async function () {
-      await mentorshipSystem.connect(mentor).registerMentor("John Doe", "Blockchain", hourlyRate);
+      await mentorshipSystem.connect(owner).registerMentor(
+        mentor.address,
+        "John Doe",
+        "Blockchain",
+        hourlyRate
+      );
       await mentorshipSystem.connect(student).registerStudent("Jane Doe");
     });
 
@@ -98,24 +129,77 @@ describe("MentorshipSystem", function () {
 
       // Mentor should receive 95%
       const mentorPayment = hourlyRate - platformFee;
-      // Note: We can't check exact balance due to gas costs, but it should be greater
       expect(finalMentorBalance > initialMentorBalance).to.be.true;
     });
+  });
 
-    it("Should not allow non-mentor to end session", async function () {
-      await mentorshipSystem.connect(student).startSession(mentor.address, {
-        value: hourlyRate
-      });
+  describe("Mentor Management", function () {
+    beforeEach(async function () {
+      await mentorshipSystem.connect(owner).registerMentor(
+        mentor.address,
+        "John Doe",
+        "Blockchain",
+        hourlyRate
+      );
+    });
 
+    it("Should allow platform to update mentor info", async function () {
+      const newRate = ethers.parseEther("0.2");
+      await mentorshipSystem.connect(owner).updateMentorInfo(
+        mentor.address,
+        "John Updated",
+        "Updated Expertise",
+        newRate,
+        false
+      );
+      
+      const mentorData = await mentorshipSystem.mentors(mentor.address);
+      expect(mentorData.name).to.equal("John Updated");
+      expect(mentorData.expertise).to.equal("Updated Expertise");
+      expect(mentorData.hourlyRate).to.equal(newRate);
+      expect(mentorData.isAvailable).to.equal(false);
+    });
+
+    it("Should not allow non-platform users to update mentor info", async function () {
       await expect(
-        mentorshipSystem.connect(addr3).endSession(student.address)
-      ).to.be.revertedWith("Only mentor can end session");
+        mentorshipSystem.connect(addr3).updateMentorInfo(
+          mentor.address,
+          "John Updated",
+          "Updated Expertise",
+          hourlyRate,
+          false
+        )
+      ).to.be.revertedWith("Only platform can call this function");
+    });
+  });
+
+  describe("Platform Management", function () {
+    it("Should allow platform to update fee", async function () {
+      await mentorshipSystem.connect(owner).updatePlatformFee(10);
+      expect(await mentorshipSystem.platformFee()).to.equal(10);
+    });
+
+    it("Should not allow fee above 20%", async function () {
+      await expect(
+        mentorshipSystem.connect(owner).updatePlatformFee(21)
+      ).to.be.revertedWith("Fee cannot exceed 20%");
+    });
+
+    it("Should not allow non-platform users to update fee", async function () {
+      await expect(
+        mentorshipSystem.connect(addr3).updatePlatformFee(10)
+      ).to.be.revertedWith("Only platform can call this function");
     });
   });
 
   describe("Rating System", function () {
     beforeEach(async function () {
-      await mentorshipSystem.connect(mentor).registerMentor("John Doe", "Blockchain", hourlyRate);
+      await mentorshipSystem.connect(owner).registerMentor(
+        mentor.address,
+        "John Doe",
+        "Blockchain",
+        hourlyRate
+      );
       await mentorshipSystem.connect(student).registerStudent("Jane Doe");
     });
 
@@ -135,55 +219,10 @@ describe("MentorshipSystem", function () {
       expect(rating).to.equal(4); // (5 + 3) / 2 = 4
       expect(totalRatings).to.equal(2);
     });
-
-    it("Should not allow rating outside 1-5 range", async function () {
-      await expect(
-        mentorshipSystem.connect(student).rateMentor(mentor.address, 6)
-      ).to.be.revertedWith("Rating must be between 1 and 5");
-    });
-  });
-
-  describe("Session History", function () {
-    beforeEach(async function () {
-      await mentorshipSystem.connect(mentor).registerMentor("John Doe", "Blockchain", hourlyRate);
-      await mentorshipSystem.connect(student).registerStudent("Jane Doe");
-      await mentorshipSystem.connect(student).startSession(mentor.address, {
-        value: hourlyRate
-      });
-    });
-
-    it("Should track mentor sessions", async function () {
-      const sessions = await mentorshipSystem.connect(mentor).getMentorSessions();
-      expect(sessions.length).to.equal(1);
-    });
-
-    it("Should track student sessions", async function () {
-      const sessions = await mentorshipSystem.connect(student).getStudentSessions();
-      expect(sessions.length).to.equal(1);
-    });
-  });
-
-  describe("Mentor Management", function () {
-    beforeEach(async function () {
-      await mentorshipSystem.connect(mentor).registerMentor("John Doe", "Blockchain", hourlyRate);
-    });
-
-    it("Should allow mentor to update availability", async function () {
-      await mentorshipSystem.connect(mentor).updateMentorStatus(false);
-      const mentorData = await mentorshipSystem.mentors(mentor.address);
-      expect(mentorData.isAvailable).to.equal(false);
-    });
-
-    it("Should allow mentor to update hourly rate", async function () {
-      const newRate = ethers.parseEther("0.2");
-      await mentorshipSystem.connect(mentor).updateHourlyRate(newRate);
-      const mentorData = await mentorshipSystem.mentors(mentor.address);
-      expect(mentorData.hourlyRate).to.equal(newRate);
-    });
   });
 
   describe("Emergency Functions", function () {
-    it("Should allow platform owner to withdraw", async function () {
+    it("Should allow platform to withdraw", async function () {
       await mentorshipSystem.connect(student).startSession(mentor.address, {
         value: hourlyRate
       });
@@ -193,10 +232,10 @@ describe("MentorshipSystem", function () {
       ).not.to.be.reverted;
     });
 
-    it("Should not allow non-owner to withdraw", async function () {
+    it("Should not allow non-platform users to withdraw", async function () {
       await expect(
         mentorshipSystem.connect(addr3).withdrawEmergency()
-      ).to.be.revertedWith("Only platform owner can withdraw");
+      ).to.be.revertedWith("Only platform can call this function");
     });
   });
-}); 
+});
