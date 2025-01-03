@@ -69,13 +69,6 @@ contract MentorshipSystem {
     event SessionEnded(address indexed mentor, address indexed student, uint256 endTime);
     event SessionCompleted(uint256 indexed sessionId);
     event PaymentProcessed(uint256 indexed sessionId, uint256 amount);
-    event AchievementMinted(address indexed student, uint256 indexed tokenId, uint256 indexed sessionId);
-    event MentorUpdated(address indexed mentorAddress, string name, string expertise, uint256 hourlyRate, bool isAvailable);
-    
-    modifier onlyPlatform() {
-        require(msg.sender == platformWallet, "Only platform can call this function");
-        _;
-    }
     
     constructor(address _eduToken) {
         platformWallet = payable(msg.sender);
@@ -87,13 +80,8 @@ contract MentorshipSystem {
         nftContract = IMentorshipNFT(_nftContract);
     }
     
-    function registerMentor(
-        address payable _mentorAddress, 
-        string memory _name, 
-        string memory _expertise, 
-        uint256 _hourlyRate
-    ) external onlyPlatform {
-        require(!mentors[_mentorAddress].isAvailable, "Mentor already registered");
+    function registerMentor(string memory _name, string memory _expertise, uint256 _hourlyRate) external {
+        require(!mentors[msg.sender].isAvailable, "Mentor already registered");
         
         uint256[] memory emptyArray;
         mentors[_mentorAddress] = Mentor({
@@ -110,6 +98,7 @@ contract MentorshipSystem {
         emit MentorRegistered(_mentorAddress, _name, _expertise);
     }
     
+    // Öğrenci kayıt fonksiyonu - herkes kullanabilir
     function registerStudent(string memory _name) external {
         require(!students[msg.sender].isRegistered, "Student already registered");
         
@@ -163,6 +152,23 @@ contract MentorshipSystem {
         mentors[_mentorAddress].isAvailable = false;
         
         emit SessionStarted(_mentorAddress, msg.sender, block.timestamp);
+    }
+    
+    // Mentor bilgilerini güncelleme - sadece platform
+    function updateMentorInfo(
+        address _mentorAddress,
+        string memory _name,
+        string memory _expertise,
+        uint256 _hourlyRate,
+        bool _isAvailable
+    ) external onlyPlatform {
+        require(mentors[_mentorAddress].walletAddress != address(0), "Mentor not registered");
+        
+        Mentor storage mentor = mentors[_mentorAddress];
+        mentor.name = _name;
+        mentor.expertise = _expertise;
+        mentor.hourlyRate = _hourlyRate;
+        mentor.isAvailable = _isAvailable;
     }
     
     function endSession(address _studentAddress) external {
@@ -264,22 +270,19 @@ contract MentorshipSystem {
         return students[msg.sender].sessionIds;
     }
 
-    // Platform emergency functions
-    function updatePlatformFee(uint256 _newFee) external onlyPlatform {
-        require(_newFee <= 20, "Fee cannot exceed 20%");
-        platformFee = _newFee;
+    function updateMentorStatus(bool _isAvailable) external {
+        require(mentors[msg.sender].walletAddress != address(0), "Not a registered mentor");
+        mentors[msg.sender].isAvailable = _isAvailable;
     }
 
-    function withdrawEmergency() external onlyPlatform {
-        uint256 balance = eduToken.balanceOf(address(this));
-        require(eduToken.transfer(platformWallet, balance), "Emergency withdrawal failed");
-    }
-    
-    function getStudentAchievements(address _student) external view returns (uint256[] memory) {
-        return students[_student].achievementIds;
+    function updateHourlyRate(uint256 _newRate) external {
+        require(mentors[msg.sender].walletAddress != address(0), "Not a registered mentor");
+        mentors[msg.sender].hourlyRate = _newRate;
     }
 
-    function getMentorHourlyRate(address _mentorAddress) external view returns (uint256) {
-        return mentors[_mentorAddress].hourlyRate;
+    // Emergency functions
+    function withdrawEmergency() external {
+        require(msg.sender == platformWallet, "Only platform owner can withdraw");
+        platformWallet.transfer(address(this).balance);
     }
-}
+} 

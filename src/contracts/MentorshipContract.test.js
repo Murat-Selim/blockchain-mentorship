@@ -60,6 +60,17 @@ describe("MentorshipSystem", function () {
       expect(mentorData.isAvailable).to.equal(true);
     });
 
+    it("Should not allow non-platform users to register mentors", async function () {
+      await expect(
+        mentorshipSystem.connect(addr3).registerMentor(
+          mentor.address,
+          "John Doe",
+          "Blockchain",
+          hourlyRate
+        )
+      ).to.be.revertedWith("Only platform can call this function");
+    });
+
     it("Should not allow non-platform to register mentor", async function () {
       await expect(
         mentorshipSystem.connect(addr3).registerMentor(
@@ -90,6 +101,12 @@ describe("MentorshipSystem", function () {
 
   describe("Session Management", function () {
     beforeEach(async function () {
+      await mentorshipSystem.connect(owner).registerMentor(
+        mentor.address,
+        "John Doe",
+        "Blockchain",
+        hourlyRate
+      );
       await mentorshipSystem.connect(owner).registerMentor(
         mentor.address,
         "John Doe",
@@ -226,4 +243,4 @@ describe("MentorshipSystem", function () {
       expect(finalBalance > initialBalance).to.be.true;
     });
   });
-}); 
+});
