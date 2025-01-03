@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useState } from 'react';
-import { ethers } from 'ethers';
+import React, { createContext, useContext, useState } from "react";
+import { ethers } from "ethers";
 
 // Contract ABI - Deploy edildikten sonra güncellenecek
-const MentorshipSystemABI = [];
+const MentorshipSystemABI: any[] = [];
 
 interface Web3ContextType {
   account: string | null;
@@ -22,7 +22,9 @@ const Web3Context = createContext<Web3ContextType>({
 
 export const useWeb3 = () => useContext(Web3Context);
 
-export const Web3Provider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const Web3Provider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [account, setAccount] = useState<string | null>(null);
   const [contract, setContract] = useState<ethers.Contract | null>(null);
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
@@ -34,11 +36,11 @@ export const Web3Provider: React.FC<{ children: React.ReactNode }> = ({ children
   const connectWallet = async () => {
     try {
       setLoading(true);
-      if (typeof window.ethereum !== 'undefined') {
+      if (typeof window.ethereum !== "undefined") {
         const provider = new ethers.BrowserProvider(window.ethereum);
         const accounts = await provider.send("eth_requestAccounts", []);
         const signer = await provider.getSigner();
-        
+
         const contract = new ethers.Contract(
           contractAddress,
           MentorshipSystemABI,
@@ -50,15 +52,17 @@ export const Web3Provider: React.FC<{ children: React.ReactNode }> = ({ children
         setProvider(provider);
       }
     } catch (error) {
-      console.error('Error connecting wallet:', error);
+      console.error("Error connecting wallet:", error);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Web3Context.Provider value={{ account, contract, provider, connectWallet, loading }}>
+    <Web3Context.Provider
+      value={{ account, contract, provider, connectWallet, loading }}
+    >
       {children}
     </Web3Context.Provider>
   );
-}; 
+};
