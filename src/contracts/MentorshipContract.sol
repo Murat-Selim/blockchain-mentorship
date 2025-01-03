@@ -285,4 +285,4 @@ contract MentorshipSystem {
         require(msg.sender == platformWallet, "Only platform owner can withdraw");
         platformWallet.transfer(address(this).balance);
     }
-} 
+}
