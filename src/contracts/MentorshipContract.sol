@@ -1,5 +1,22 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.9;
+
+interface IMentorshipNFT {
+    function mintAchievement(
+        address student,
+        string memory title,
+        string memory description,
+        uint256 sessionId,
+        address mentor
+    ) external returns (uint256);
+}
+
+interface IERC20 {
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
+    function allowance(address owner, address spender) external view returns (uint256);
+}
 
 contract MentorshipSystem {
     struct Mentor {
@@ -19,6 +36,7 @@ contract MentorshipSystem {
         bool isRegistered;
         address currentMentor;
         uint256[] sessionIds;
+        uint256[] achievementIds;
     }
 
     struct Session {
@@ -31,6 +49,7 @@ contract MentorshipSystem {
         bool isActive;
         bool isPaid;
         bool isCompleted;
+        bool nftMinted;
     }
 
     mapping(address => Mentor) public mentors;
@@ -38,9 +57,11 @@ contract MentorshipSystem {
     mapping(uint256 => Session) public sessions;
     mapping(bytes32 => Session) public activeSessionsByHash;
     
-    uint256 public platformFee = 5; // %5 platform ücreti
+    uint256 public platformFee = 5;
     address payable public platformWallet;
     uint256 public sessionCounter;
+    IMentorshipNFT public nftContract;
+    IERC20 public eduToken;
     
     event MentorRegistered(address indexed mentorAddress, string name, string expertise);
     event StudentRegistered(address indexed studentAddress, string name);
@@ -49,17 +70,22 @@ contract MentorshipSystem {
     event SessionCompleted(uint256 indexed sessionId);
     event PaymentProcessed(uint256 indexed sessionId, uint256 amount);
     
-    constructor() {
+    constructor(address _eduToken) {
         platformWallet = payable(msg.sender);
         sessionCounter = 0;
+        eduToken = IERC20(_eduToken);
+    }
+    
+    function setNFTContract(address _nftContract) external onlyPlatform {
+        nftContract = IMentorshipNFT(_nftContract);
     }
     
     function registerMentor(string memory _name, string memory _expertise, uint256 _hourlyRate) external {
         require(!mentors[msg.sender].isAvailable, "Mentor already registered");
         
         uint256[] memory emptyArray;
-        mentors[msg.sender] = Mentor({
-            walletAddress: payable(msg.sender),
+        mentors[_mentorAddress] = Mentor({
+            walletAddress: _mentorAddress,
             name: _name,
             expertise: _expertise,
             hourlyRate: _hourlyRate,
@@ -69,9 +95,10 @@ contract MentorshipSystem {
             sessionIds: emptyArray
         });
         
-        emit MentorRegistered(msg.sender, _name, _expertise);
+        emit MentorRegistered(_mentorAddress, _name, _expertise);
     }
     
+    // Öğrenci kayıt fonksiyonu - herkes kullanabilir
     function registerStudent(string memory _name) external {
         require(!students[msg.sender].isRegistered, "Student already registered");
         
@@ -81,16 +108,23 @@ contract MentorshipSystem {
             name: _name,
             isRegistered: true,
             currentMentor: address(0),
-            sessionIds: emptyArray
+            sessionIds: emptyArray,
+            achievementIds: emptyArray
         });
         
         emit StudentRegistered(msg.sender, _name);
     }
     
-    function startSession(address _mentorAddress) external payable {
+    function startSession(address _mentorAddress) external {
         require(students[msg.sender].isRegistered, "Student not registered");
         require(mentors[_mentorAddress].isAvailable, "Mentor not available");
-        require(msg.value >= mentors[_mentorAddress].hourlyRate, "Insufficient payment");
+        
+        uint256 hourlyRate = mentors[_mentorAddress].hourlyRate;
+        require(eduToken.allowance(msg.sender, address(this)) >= hourlyRate, "Insufficient EDU token allowance");
+        require(eduToken.balanceOf(msg.sender) >= hourlyRate, "Insufficient EDU token balance");
+        
+        // Transfer EDU tokens from student to contract
+        require(eduToken.transferFrom(msg.sender, address(this), hourlyRate), "EDU token transfer failed");
         
         uint256 sessionId = sessionCounter++;
         bytes32 sessionHash = keccak256(abi.encodePacked(_mentorAddress, msg.sender, block.timestamp));
@@ -101,10 +135,11 @@ contract MentorshipSystem {
             student: msg.sender,
             startTime: block.timestamp,
             duration: 1 hours,
-            amount: msg.value,
+            amount: hourlyRate,
             isActive: true,
             isPaid: true,
-            isCompleted: false
+            isCompleted: false,
+            nftMinted: false
         });
         
         sessions[sessionId] = newSession;
@@ -119,14 +154,41 @@ contract MentorshipSystem {
         emit SessionStarted(_mentorAddress, msg.sender, block.timestamp);
     }
     
+    // Mentor bilgilerini güncelleme - sadece platform
+    function updateMentorInfo(
+        address _mentorAddress,
+        string memory _name,
+        string memory _expertise,
+        uint256 _hourlyRate,
+        bool _isAvailable
+    ) external onlyPlatform {
+        require(mentors[_mentorAddress].walletAddress != address(0), "Mentor not registered");
+        
+        Mentor storage mentor = mentors[_mentorAddress];
+        mentor.name = _name;
+        mentor.expertise = _expertise;
+        mentor.hourlyRate = _hourlyRate;
+        mentor.isAvailable = _isAvailable;
+    }
+    
     function endSession(address _studentAddress) external {
         require(msg.sender == mentors[msg.sender].walletAddress, "Only mentor can end session");
         
-        bytes32 sessionHash = keccak256(abi.encodePacked(msg.sender, _studentAddress, block.timestamp));
-        Session storage session = activeSessionsByHash[sessionHash];
+        // Find active session for this mentor and student
+        uint256 activeSessionId;
+        bool found = false;
+        for (uint256 i = 0; i < mentors[msg.sender].sessionIds.length; i++) {
+            uint256 sessionId = mentors[msg.sender].sessionIds[i];
+            if (sessions[sessionId].student == _studentAddress && sessions[sessionId].isActive) {
+                activeSessionId = sessionId;
+                found = true;
+                break;
+            }
+        }
         
-        require(session.isActive, "Session not active");
+        require(found, "Session not active");
         
+        Session storage session = sessions[activeSessionId];
         session.isActive = false;
         session.isCompleted = true;
         mentors[msg.sender].isAvailable = true;
@@ -136,12 +198,54 @@ contract MentorshipSystem {
         uint256 platformCut = (payment * platformFee) / 100;
         uint256 mentorPayment = payment - platformCut;
         
-        platformWallet.transfer(platformCut);
-        mentors[msg.sender].walletAddress.transfer(mentorPayment);
+        // Transfer EDU tokens to platform and mentor
+        require(eduToken.transfer(platformWallet, platformCut), "Platform fee transfer failed");
+        require(eduToken.transfer(mentors[msg.sender].walletAddress, mentorPayment), "Mentor payment transfer failed");
+        
+        // NFT Ödülü Verme
+        if (!session.nftMinted && address(nftContract) != address(0)) {
+            string memory title = string(abi.encodePacked(
+                "Session with ", mentors[msg.sender].name
+            ));
+            string memory description = string(abi.encodePacked(
+                "Completed mentorship session in ", mentors[msg.sender].expertise
+            ));
+            
+            uint256 tokenId = nftContract.mintAchievement(
+                _studentAddress,
+                title,
+                description,
+                session.sessionId,
+                msg.sender
+            );
+            
+            session.nftMinted = true;
+            students[_studentAddress].achievementIds.push(tokenId);
+            
+            emit AchievementMinted(_studentAddress, tokenId, session.sessionId);
+        }
         
         emit SessionEnded(msg.sender, _studentAddress, block.timestamp);
         emit SessionCompleted(session.sessionId);
         emit PaymentProcessed(session.sessionId, payment);
+    }
+
+    function updateMentor(
+        address _mentorAddress,
+        string memory _name,
+        string memory _expertise,
+        uint256 _hourlyRate,
+        bool _isAvailable
+    ) external onlyPlatform {
+        require(mentors[_mentorAddress].walletAddress != address(0), "Mentor not registered");
+        
+        Mentor storage mentor = mentors[_mentorAddress];
+        mentor.name = _name;
+        mentor.expertise = _expertise;
+        mentor.hourlyRate = _hourlyRate;
+        mentor.isAvailable = _isAvailable;
+        
+        emit MentorUpdated(_mentorAddress, _name, _expertise, _hourlyRate, _isAvailable);
     }
     
     function rateMentor(address _mentorAddress, uint256 _rating) external {
@@ -152,14 +256,14 @@ contract MentorshipSystem {
         mentor.rating = ((mentor.rating * mentor.totalRatings) + _rating) / (mentor.totalRatings + 1);
         mentor.totalRatings++;
     }
-    
+
+    // View functions
     function getMentorRating(address _mentorAddress) external view returns (uint256, uint256) {
         return (mentors[_mentorAddress].rating, mentors[_mentorAddress].totalRatings);
     }
 
-    // Eklenen yeni fonksiyonlar
-    function getMentorSessions() external view returns (uint256[] memory) {
-        return mentors[msg.sender].sessionIds;
+    function getMentorSessions(address _mentorAddress) external view returns (uint256[] memory) {
+        return mentors[_mentorAddress].sessionIds;
     }
 
     function getStudentSessions() external view returns (uint256[] memory) {
@@ -181,4 +285,4 @@ contract MentorshipSystem {
         require(msg.sender == platformWallet, "Only platform owner can withdraw");
         platformWallet.transfer(address(this).balance);
     }
-} 
+}
