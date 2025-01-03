@@ -1,27 +1,11 @@
-// import React from "react";
-// import "./App.css";
-// import Navbar from "./components/Navbar";
-
-// function App() {
-//   return (
-//     <div className="App">
-//       <Navbar />
-//       <header className="App-header">
-//         <h1>Your Path to Blockchain Mastery: Connect with Expert Mentors.</h1>
-//         <p>Welcome to the Blockchain Mentorship Platform</p>
-//       </header>
-//     </div>
-//   );
-// }
-
-// export default App;
-
 import React from "react";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import { Web3ReactProvider } from "@web3-react/core";
 import { Web3Provider } from "@ethersproject/providers";
-import HomePage from "./components/HomePage";
-import LoginPage from "./components/LoginPage";
+import GlobalStyles from "./styles/GlobalStyles";
+import HomePage from "./pages/HomePage";
+import LoginPage from "./pages/LoginPage";
+import SignUpPage from "./pages/SignUpPage";
 import Footer from "./components/Footer";
 import Navbar from "./components/Navbar";
 
@@ -32,6 +16,7 @@ function getLibrary(provider: any): Web3Provider {
 const App: React.FC = () => {
   return (
     <Web3ReactProvider getLibrary={getLibrary}>
+      <GlobalStyles />
       <Router>
         <Navbar />
         <Routes>
@@ -40,11 +25,14 @@ const App: React.FC = () => {
             element={<LoginPage />}
           />
           <Route
+            path="/signup"
+            element={<SignUpPage />}
+          />
+          <Route
             path="/"
             element={<HomePage />}
           />
         </Routes>
-        <Footer />
       </Router>
     </Web3ReactProvider>
   );
