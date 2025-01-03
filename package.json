@@ -6,6 +6,7 @@
     "@chakra-ui/react": "^2.8.2",
     "@emotion/react": "^11.11.3",
     "@emotion/styled": "^11.11.0",
+    "@openzeppelin/contracts": "^4.9.0",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@web3-react/core": "^6.1.9",
@@ -43,10 +44,22 @@
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
-    "@openzeppelin/contracts": "^5.0.1",
     "@types/node": "^20.10.6",
     "dotenv": "^16.4.7",
     "hardhat": "^2.19.4",
     "ts-node": "^10.9.2"
-  }
+  },
+  "description": "A decentralized platform for connecting mentors and students in the blockchain space.",
+  "main": "hardhat.config.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Murat-Selim/blockchain-mentorship.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Murat-Selim/blockchain-mentorship/issues"
+  },
+  "homepage": "https://github.com/Murat-Selim/blockchain-mentorship#readme"
 }
