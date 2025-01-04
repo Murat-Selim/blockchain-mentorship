@@ -65,10 +65,17 @@ contract MentorshipSystem {
     
     event MentorRegistered(address indexed mentorAddress, string name, string expertise);
     event StudentRegistered(address indexed studentAddress, string name);
-    event SessionStarted(address indexed mentor, address indexed student, uint256 startTime);
-    event SessionEnded(address indexed mentor, address indexed student, uint256 endTime);
+    event SessionStarted(address indexed mentor, address indexed student, uint256 indexed startTime);
+    event SessionEnded(address indexed mentor, address indexed student, uint256 indexed endTime);
     event SessionCompleted(uint256 indexed sessionId);
     event PaymentProcessed(uint256 indexed sessionId, uint256 amount);
+    event AchievementMinted(address indexed student, uint256 indexed tokenId, uint256 indexed sessionId);
+    event MentorUpdated(address indexed mentorAddress, string name, string expertise, uint256 hourlyRate, bool isAvailable);
+
+    modifier onlyPlatform() {
+        require(msg.sender == platformWallet, "Only platformWallet can perform this action");
+        _;
+    }
     
     constructor(address _eduToken) {
         platformWallet = payable(msg.sender);
@@ -80,12 +87,16 @@ contract MentorshipSystem {
         nftContract = IMentorshipNFT(_nftContract);
     }
     
-    function registerMentor(string memory _name, string memory _expertise, uint256 _hourlyRate) external {
+    function registerMentor(
+        string memory _name, 
+        string memory _expertise, 
+        uint256 _hourlyRate
+    ) external {
         require(!mentors[msg.sender].isAvailable, "Mentor already registered");
         
         uint256[] memory emptyArray;
-        mentors[_mentorAddress] = Mentor({
-            walletAddress: _mentorAddress,
+        mentors[msg.sender] = Mentor({
+            walletAddress: payable(msg.sender),
             name: _name,
             expertise: _expertise,
             hourlyRate: _hourlyRate,
@@ -95,21 +106,23 @@ contract MentorshipSystem {
             sessionIds: emptyArray
         });
         
-        emit MentorRegistered(_mentorAddress, _name, _expertise);
+        emit MentorRegistered(msg.sender, _name, _expertise);
     }
     
     // Öğrenci kayıt fonksiyonu - herkes kullanabilir
     function registerStudent(string memory _name) external {
         require(!students[msg.sender].isRegistered, "Student already registered");
         
-        uint256[] memory emptyArray;
+        uint256[] memory emptySessionIds = new uint256[](0);
+        uint256[] memory emptyAchievementIds = new uint256[](0);
+        
         students[msg.sender] = Student({
             walletAddress: msg.sender,
             name: _name,
             isRegistered: true,
             currentMentor: address(0),
-            sessionIds: emptyArray,
-            achievementIds: emptyArray
+            sessionIds: emptySessionIds,
+            achievementIds: emptyAchievementIds
         });
         
         emit StudentRegistered(msg.sender, _name);
@@ -152,23 +165,6 @@ contract MentorshipSystem {
         mentors[_mentorAddress].isAvailable = false;
         
         emit SessionStarted(_mentorAddress, msg.sender, block.timestamp);
-    }
-    
-    // Mentor bilgilerini güncelleme - sadece platform
-    function updateMentorInfo(
-        address _mentorAddress,
-        string memory _name,
-        string memory _expertise,
-        uint256 _hourlyRate,
-        bool _isAvailable
-    ) external onlyPlatform {
-        require(mentors[_mentorAddress].walletAddress != address(0), "Mentor not registered");
-        
-        Mentor storage mentor = mentors[_mentorAddress];
-        mentor.name = _name;
-        mentor.expertise = _expertise;
-        mentor.hourlyRate = _hourlyRate;
-        mentor.isAvailable = _isAvailable;
     }
     
     function endSession(address _studentAddress) external {
@@ -280,9 +276,21 @@ contract MentorshipSystem {
         mentors[msg.sender].hourlyRate = _newRate;
     }
 
-    // Emergency functions
-    function withdrawEmergency() external {
-        require(msg.sender == platformWallet, "Only platform owner can withdraw");
-        platformWallet.transfer(address(this).balance);
+    // Platform yönetimi fonksiyonları
+    function updatePlatformFee(uint256 _newFee) external onlyPlatform {
+        require(_newFee <= 20, "Fee cannot exceed 20%");
+        platformFee = _newFee;
+    }
+
+    function withdrawEmergency() external onlyPlatform {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No balance to withdraw");
+        platformWallet.transfer(balance);
+    }
+
+    function withdrawEduTokenEmergency() external onlyPlatform {
+        uint256 balance = eduToken.balanceOf(address(this));
+        require(balance > 0, "No EDU tokens to withdraw");
+        require(eduToken.transfer(platformWallet, balance), "Transfer failed");
     }
 }
