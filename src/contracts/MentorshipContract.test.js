@@ -46,8 +46,7 @@ describe("MentorshipSystem", function () {
 
   describe("Mentor Registration", function () {
     it("Should register a new mentor", async function () {
-      await mentorshipSystem.connect(owner).registerMentor(
-        mentor.address,
+      await mentorshipSystem.connect(mentor).registerMentor(
         "John Doe",
         "Blockchain",
         hourlyRate
@@ -60,26 +59,20 @@ describe("MentorshipSystem", function () {
       expect(mentorData.isAvailable).to.equal(true);
     });
 
-    it("Should not allow non-platform users to register mentors", async function () {
+    it("Should not allow duplicate mentor registration", async function () {
+      await mentorshipSystem.connect(mentor).registerMentor(
+        "John Doe",
+        "Blockchain",
+        hourlyRate
+      );
+      
       await expect(
-        mentorshipSystem.connect(addr3).registerMentor(
-          mentor.address,
+        mentorshipSystem.connect(mentor).registerMentor(
           "John Doe",
           "Blockchain",
           hourlyRate
         )
-      ).to.be.revertedWith("Only platform can call this function");
-    });
-
-    it("Should not allow non-platform to register mentor", async function () {
-      await expect(
-        mentorshipSystem.connect(addr3).registerMentor(
-          mentor.address,
-          "John Doe",
-          "Blockchain",
-          hourlyRate
-        )
-      ).to.be.revertedWith("Only platform can call this function");
+      ).to.be.revertedWith("Mentor already registered");
     });
   });
 
@@ -101,20 +94,14 @@ describe("MentorshipSystem", function () {
 
   describe("Session Management", function () {
     beforeEach(async function () {
-      await mentorshipSystem.connect(owner).registerMentor(
-        mentor.address,
-        "John Doe",
-        "Blockchain",
-        hourlyRate
-      );
-      await mentorshipSystem.connect(owner).registerMentor(
-        mentor.address,
+      // Register mentor directly
+      await mentorshipSystem.connect(mentor).registerMentor(
         "John Doe",
         "Blockchain",
         hourlyRate
       );
       await mentorshipSystem.connect(student).registerStudent("Jane Doe");
-      await eduToken.connect(student).approve(mentorshipSystem.getAddress(), hourlyRate);
+      await eduToken.connect(student).approve(await mentorshipSystem.getAddress(), hourlyRate);
     });
 
     it("Should start a session with EDU token payment", async function () {
@@ -177,37 +164,57 @@ describe("MentorshipSystem", function () {
   });
 
   describe("NFT Integration", function () {
+    let MentorshipNFT;
     let nftContract;
 
     beforeEach(async function () {
-      // Deploy NFT Contract
-      const MentorshipNFT = await ethers.getContractFactory("MentorshipNFT");
+      // Deploy NFT contract
+      MentorshipNFT = await ethers.getContractFactory("MentorshipNFT");
       nftContract = await MentorshipNFT.deploy();
       await nftContract.waitForDeployment();
 
-      // Setup NFT Contract
-      await nftContract.setMinterRole(mentorshipSystem.getAddress(), true);
-      await mentorshipSystem.connect(owner).setNFTContract(nftContract.getAddress());
+      // Set NFT contract in MentorshipSystem
+      await mentorshipSystem.connect(owner).setNFTContract(await nftContract.getAddress());
 
-      // Setup session
-      await mentorshipSystem.connect(owner).registerMentor(
-        mentor.address,
+      // Set minter role for MentorshipSystem
+      await nftContract.connect(owner).setMinterRole(await mentorshipSystem.getAddress(), true);
+
+      // Register mentor and student
+      await mentorshipSystem.connect(mentor).registerMentor(
         "John Doe",
         "Blockchain",
         hourlyRate
       );
       await mentorshipSystem.connect(student).registerStudent("Jane Doe");
-      await eduToken.connect(student).approve(mentorshipSystem.getAddress(), hourlyRate);
+
+      // Approve and start session
+      await eduToken.connect(student).approve(await mentorshipSystem.getAddress(), hourlyRate);
       await mentorshipSystem.connect(student).startSession(mentor.address);
     });
 
     it("Should mint NFT when session is completed", async function () {
-      await mentorshipSystem.connect(mentor).endSession(student.address);
+      // Seansı bitir ve eventi bekle
+      const tx = await mentorshipSystem.connect(mentor).endSession(student.address);
+      const receipt = await tx.wait();
       
-      const studentAchievements = await mentorshipSystem.getStudentAchievements(student.address);
-      expect(studentAchievements.length).to.equal(1);
+      // Filtrele ve eventi bul
+      const interface = mentorshipSystem.interface;
+      const achievementMintedEvent = receipt.logs
+        .filter(log => {
+          try {
+            const parsed = interface.parseLog(log);
+            return parsed.name === 'AchievementMinted';
+          } catch {
+            return false;
+          }
+        })[0];
       
-      const nftOwner = await nftContract.ownerOf(1);
+      expect(achievementMintedEvent).to.not.be.undefined;
+      const parsedLog = interface.parseLog(achievementMintedEvent);
+      const tokenId = parsedLog.args[1]; // tokenId ikinci argüman
+      
+      // NFT sahipliğini kontrol et
+      const nftOwner = await nftContract.ownerOf(tokenId);
       expect(nftOwner).to.equal(student.address);
     });
   });
@@ -226,21 +233,20 @@ describe("MentorshipSystem", function () {
 
     it("Should allow emergency withdrawal", async function () {
       // First create a session and send EDU tokens to contract
-      await mentorshipSystem.connect(owner).registerMentor(
-        mentor.address,
+      await mentorshipSystem.connect(mentor).registerMentor(
         "John Doe",
         "Blockchain",
         hourlyRate
       );
       await mentorshipSystem.connect(student).registerStudent("Jane Doe");
-      await eduToken.connect(student).approve(mentorshipSystem.getAddress(), hourlyRate);
+      await eduToken.connect(student).approve(await mentorshipSystem.getAddress(), hourlyRate);
       await mentorshipSystem.connect(student).startSession(mentor.address);
 
       const initialBalance = await eduToken.balanceOf(owner.address);
-      await mentorshipSystem.connect(owner).withdrawEmergency();
+      await mentorshipSystem.connect(owner).withdrawEduTokenEmergency();
       const finalBalance = await eduToken.balanceOf(owner.address);
-
-      expect(finalBalance > initialBalance).to.be.true;
+      
+      expect(finalBalance).to.be.above(initialBalance);
     });
   });
 });
